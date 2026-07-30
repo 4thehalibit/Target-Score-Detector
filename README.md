@@ -42,8 +42,22 @@ To (re)install the shortcut on its own: `./make-shortcut.sh`. To launch from a
 terminal instead: `./run.sh` (or `./run.sh 1` to pick camera index 1).
 
 Prop the tablet/webcam so it sees the target face straight-on. It auto-locks on
-the clean face after a short countdown; on-screen **BASELINE / CLEAR / QUIT**
-buttons (touch) control it — no keyboard required.
+the clean face after a short countdown; on-screen touch buttons control it — no
+keyboard required:
+
+- **BASELINE** — lock onto the clean face now (also discards the current end)
+- **SAVE END** — record the current end to `score_history.csv`, then reset
+- **CAMERA** — cycle to the next connected camera (e.g. a USB webcam)
+- **QUIT** — exit
+
+### Scoring history
+
+Tapping **SAVE END** appends one row per shooting end to `score_history.csv`
+(next to the scripts): timestamp, arrow count, total, each arrow's score, and
+the group spread in inches. Open it in any spreadsheet. The live window also
+shows a running **ends / total** for the current session. A typical loop:
+auto-lock on the clean face → shoot → **SAVE END** → pull arrows → it re-locks
+for the next end.
 
 Under the hood the launcher just runs:
 

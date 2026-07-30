@@ -10,18 +10,24 @@ Approach (robust for a fixed / propped camera):
 
 No keyboard needed: tap the on-screen buttons (the tablet touchscreen
 registers taps as clicks).
-  BASELINE  lock onto the clean face now
-  CLEAR     clear hits / re-lock
+  BASELINE  lock onto the clean face now (also discards the current end)
+  SAVE END  record this end to score_history.csv, then reset for the next end
   CAMERA    switch to the next connected camera (e.g. a plugged-in webcam)
   QUIT      exit
-Keys b / c / n / q still work too. The active camera index shows top-right.
+Keys b / s / n / q still work too. The active camera index shows top-right;
+session ends + running total show below it. History: score_history.csv.
 
 This is a starting point meant to be tuned against the real target -- arrow
 impact estimation (currently the blob centroid) and the diff threshold will
 need adjustment once we see it running on the tablet.
 """
+import csv
+import os
 import sys
 import time
+from datetime import datetime
+from itertools import combinations
+
 import cv2
 import numpy as np
 
@@ -32,6 +38,39 @@ DIFF_THRESH = 45          # grayscale difference that counts as "changed"
 MIN_ARROW_AREA = 60       # px, ignore smaller changed blobs as noise
 AUTO_BASELINE_SEC = 3.0   # auto-lock this long after a clean disc is visible
 RECONNECT_SEC = 1.5       # how often to retry the camera after it drops out
+
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'score_history.csv')
+
+
+def spread_inches(scored, R):
+    """Widest gap between any two hits, in inches (0 for <2 hits)."""
+    pts = [(x, y) for x, y, _ in scored]
+    if len(pts) < 2 or not R:
+        return 0.0
+    worst = max(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+                for a, b in combinations(pts, 2))
+    return worst * FACE_DIAMETER_IN / (2.0 * R)
+
+
+def save_end(scored, R):
+    """Append one shooting end to the history CSV. Returns the row dict."""
+    total = sum(s for _, _, s in scored)
+    row = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'arrows': len(scored),
+        'total': total,
+        'scores': ' '.join(str(s) for _, _, s in scored),
+        'spread_in': round(spread_inches(scored, R), 2),
+    }
+    new = not os.path.exists(HISTORY_FILE)
+    with open(HISTORY_FILE, 'a', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if new:
+            w.writeheader()
+        w.writerow(row)
+    print(f"saved end: {row}")
+    return row
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 _ui = {'buttons': {}, 'action': None}
@@ -44,8 +83,8 @@ def _on_mouse(event, x, y, flags, param):
                 param['action'] = name
 
 
-BUTTON_ORDER = ['baseline', 'clear', 'camera', 'quit']
-BUTTON_LABELS = {'baseline': 'BASELINE', 'clear': 'CLEAR',
+BUTTON_ORDER = ['baseline', 'save', 'camera', 'quit']
+BUTTON_LABELS = {'baseline': 'BASELINE', 'save': 'SAVE END',
                  'camera': 'CAMERA', 'quit': 'QUIT'}
 
 
@@ -173,6 +212,10 @@ def main(cam_index):
     disc_seen_since = None
     last_wh = (640, 480)      # remembered so we can draw a UI with no camera
     last_reconnect = 0.0
+    last_scored = []          # current end's scored hits, for SAVE END
+    session_ends = 0
+    session_total = 0
+    flash = ('', 0.0)         # (message, expiry time) shown briefly after save
     print(__doc__)
 
     while True:
@@ -207,7 +250,8 @@ def main(cam_index):
             _ui['buttons'] = button_layout(w, h)
 
             if baseline is not None:
-                disp, _, _ = score_frame(frame, baseline, cx, cy, R, disc_mask)
+                disp, last_scored, _ = score_frame(frame, baseline,
+                                                   cx, cy, R, disc_mask)
             else:
                 disp = frame.copy()
                 lock = try_lock(frame)
@@ -231,6 +275,11 @@ def main(cam_index):
 
         cv2.putText(disp, f"cam {cur_idx}", (w - 90, 26), FONT, 0.6,
                     (200, 200, 200), 2, cv2.LINE_AA)
+        cv2.putText(disp, f"ends {session_ends}  total {session_total}",
+                    (w - 240, 52), FONT, 0.6, (200, 200, 200), 2, cv2.LINE_AA)
+        if flash[1] > time.time():
+            cv2.putText(disp, flash[0], (10, last_wh[1] - 70), FONT, 0.7,
+                        (0, 255, 0), 2, cv2.LINE_AA)
         draw_buttons(disp, _ui['buttons'])
         cv2.imshow(win, disp)
         key = cv2.waitKey(1) & 0xff
@@ -239,8 +288,8 @@ def main(cam_index):
         _ui['action'] = None
         if key == ord('b'):
             action = 'baseline'
-        elif key == ord('c'):
-            action = 'clear'
+        elif key == ord('s'):
+            action = 'save'
         elif key == ord('n'):
             action = 'camera'
         elif key in (ord('q'), 27):
@@ -253,10 +302,19 @@ def main(cam_index):
             if res is not None:
                 baseline, cx, cy, R, disc_mask = res
             disc_seen_since = None
-        elif action == 'clear':
+        elif action == 'save':
+            if last_scored:
+                row = save_end(last_scored, R)
+                session_ends += 1
+                session_total += row['total']
+                flash = (f"Saved end #{session_ends}: {row['total']} pts "
+                         f"({row['arrows']} arrows)", time.time() + 3)
+            else:
+                flash = ("No arrows detected -- nothing to save",
+                         time.time() + 3)
             baseline = None
             disc_seen_since = None
-            print("cleared -- will re-lock on the clean face")
+            last_scored = []
         elif action == 'camera':
             newcap, newidx = next_working_camera(cur_idx)
             if newcap is not None:
