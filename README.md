@@ -36,7 +36,16 @@ Dependencies are just `opencv-python` and `numpy` (see `requirements.txt`).
 
 ## Live scoring (camera)
 
-Prop the tablet/webcam so it sees the target face straight-on, then:
+`./install.sh` adds a **"Rinehart 18-1 Scorer"** launcher to your apps menu
+(clover icon) — just tap it; no terminal needed. You can drag it to the dock.
+To (re)install the shortcut on its own: `./make-shortcut.sh`. To launch from a
+terminal instead: `./run.sh` (or `./run.sh 1` to pick camera index 1).
+
+Prop the tablet/webcam so it sees the target face straight-on. It auto-locks on
+the clean face after a short countdown; on-screen **BASELINE / CLEAR / QUIT**
+buttons (touch) control it — no keyboard required.
+
+Under the hood the launcher just runs:
 
 ```bash
 python live.py            # or: python live.py 1   to pick camera index 1

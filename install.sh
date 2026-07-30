@@ -14,16 +14,19 @@ python3 -m venv .venv
 ./.venv/bin/pip install --upgrade pip
 ./.venv/bin/pip install -r requirements.txt
 
+echo ">> Installing desktop launcher ..."
+./make-shortcut.sh || echo "   (skipped shortcut; not a desktop session)"
+
 cat <<'EOF'
 
-Done. To use it:
+Done. Launch the live scorer either way:
 
+  * Tap "Rinehart 18-1 Scorer" in your apps menu (drag it to the dock), or
+  * ./run.sh
+
+Other tools:
   source .venv/bin/activate
-
-  # Score a single straight-on photo of the Rinehart 18-1 clover face:
-  python clover_scorer.py path/to/your_photo.jpg out.png
-
-  # Original archery video demo (annotates res/input/video.mp4):
-  python Driver.py
+  python clover_scorer.py path/to/photo.jpg out.png   # score one still photo
+  python Driver.py                                      # original archery video demo
 
 EOF
