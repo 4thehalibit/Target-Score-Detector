@@ -8,8 +8,13 @@ Approach (robust for a fixed / propped camera):
      appeared objects (arrows). Each hit is scored by its ring, and the total
      is drawn live.
 
-No keyboard needed: tap the on-screen BASELINE / CLEAR / QUIT buttons (the
-tablet touchscreen registers taps as clicks). Keys b / c / q still work too.
+No keyboard needed: tap the on-screen buttons (the tablet touchscreen
+registers taps as clicks).
+  BASELINE  lock onto the clean face now
+  CLEAR     clear hits / re-lock
+  CAMERA    switch to the next connected camera (e.g. a plugged-in webcam)
+  QUIT      exit
+Keys b / c / n / q still work too. The active camera index shows top-right.
 
 This is a starting point meant to be tuned against the real target -- arrow
 impact estimation (currently the blob centroid) and the diff threshold will
@@ -38,22 +43,28 @@ def _on_mouse(event, x, y, flags, param):
                 param['action'] = name
 
 
+BUTTON_ORDER = ['baseline', 'clear', 'camera', 'quit']
+BUTTON_LABELS = {'baseline': 'BASELINE', 'clear': 'CLEAR',
+                 'camera': 'CAMERA', 'quit': 'QUIT'}
+
+
 def button_layout(w, h):
-    bw, bh, m = min(150, (w - 40) // 3), 44, 10
+    n = len(BUTTON_ORDER)
+    m, bh = 10, 44
+    bw = min(150, (w - (n + 1) * m) // n)
     y1 = h - bh - m
-    return {
-        'baseline': (m, y1, m + bw, y1 + bh),
-        'clear': (2 * m + bw, y1, 2 * m + 2 * bw, y1 + bh),
-        'quit': (3 * m + 2 * bw, y1, 3 * m + 3 * bw, y1 + bh),
-    }
+    layout = {}
+    for i, name in enumerate(BUTTON_ORDER):
+        x1 = m + i * (bw + m)
+        layout[name] = (x1, y1, x1 + bw, y1 + bh)
+    return layout
 
 
 def draw_buttons(img, buttons):
-    labels = {'baseline': 'BASELINE', 'clear': 'CLEAR', 'quit': 'QUIT'}
     for name, (x1, y1, x2, y2) in buttons.items():
         cv2.rectangle(img, (x1, y1), (x2, y2), (50, 50, 50), -1)
         cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), 1)
-        cv2.putText(img, labels[name], (x1 + 12, y1 + 30), FONT, 0.55,
+        cv2.putText(img, BUTTON_LABELS[name], (x1 + 10, y1 + 30), FONT, 0.5,
                     (255, 255, 255), 2, cv2.LINE_AA)
 
 
@@ -112,22 +123,42 @@ def _do_baseline(frame):
     return (frame.copy(), cx, cy, R, mask)
 
 
-def open_camera(preferred):
-    """Try the preferred index first, then scan others for a working camera."""
-    order = [preferred] + [i for i in range(0, 6) if i != preferred]
-    for idx in order:
-        cap = cv2.VideoCapture(idx)
-        if cap.isOpened():
-            ok, _ = cap.read()
-            if ok:
-                print(f"using camera index {idx}")
-                return cap
-            cap.release()
+MAX_CAM_INDEX = 6
+
+
+def _try_open(idx):
+    cap = cv2.VideoCapture(idx)
+    if cap.isOpened():
+        ok, _ = cap.read()
+        if ok:
+            return cap
+        cap.release()
     return None
 
 
+def open_camera(preferred):
+    """Try the preferred index first, then scan others for a working camera."""
+    order = [preferred] + [i for i in range(MAX_CAM_INDEX) if i != preferred]
+    for idx in order:
+        cap = _try_open(idx)
+        if cap is not None:
+            print(f"using camera index {idx}")
+            return cap, idx
+    return None, None
+
+
+def next_working_camera(current):
+    """First working camera *after* `current` (wrapping); (None, current) if none else."""
+    for step in range(1, MAX_CAM_INDEX):
+        idx = (current + step) % MAX_CAM_INDEX
+        cap = _try_open(idx)
+        if cap is not None:
+            return cap, idx
+    return None, current
+
+
 def main(cam_index):
-    cap = open_camera(cam_index)
+    cap, cur_idx = open_camera(cam_index)
     if cap is None:
         print("Could not open any camera (tried indices 0-5). "
               "Is another app using it, or is camera permission blocked?")
@@ -171,6 +202,8 @@ def main(cam_index):
                 cv2.putText(disp, "Point at the clean clover face...",
                             (10, 26), FONT, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
+        cv2.putText(disp, f"cam {cur_idx}", (w - 90, 26), FONT, 0.6,
+                    (200, 200, 200), 2, cv2.LINE_AA)
         draw_buttons(disp, _ui['buttons'])
         cv2.imshow(win, disp)
         key = cv2.waitKey(1) & 0xff
@@ -181,6 +214,8 @@ def main(cam_index):
             action = 'baseline'
         elif key == ord('c'):
             action = 'clear'
+        elif key == ord('n'):
+            action = 'camera'
         elif key in (ord('q'), 27):
             action = 'quit'
 
@@ -195,6 +230,16 @@ def main(cam_index):
             baseline = None
             disc_seen_since = None
             print("cleared -- will re-lock on the clean face")
+        elif action == 'camera':
+            newcap, newidx = next_working_camera(cur_idx)
+            if newcap is not None:
+                cap.release()
+                cap, cur_idx = newcap, newidx
+                baseline = None
+                disc_seen_since = None
+                print(f"switched to camera {cur_idx}")
+            else:
+                print("no other working camera found")
 
     cap.release()
     cv2.destroyAllWindows()
