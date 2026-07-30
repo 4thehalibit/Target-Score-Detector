@@ -165,20 +165,44 @@ def _do_baseline(frame):
 
 MAX_CAM_INDEX = 6
 
+# On Linux force the V4L2 backend so OpenCV doesn't fall back to a GStreamer
+# pipeline (which can pop up a separate video-sink window). Fall back to the
+# default backend on other platforms / if V4L2 isn't available.
+_BACKENDS = [getattr(cv2, 'CAP_V4L2', None), getattr(cv2, 'CAP_ANY', 0)]
+_BACKENDS = [b for b in _BACKENDS if b is not None]
+
+
+def camera_indices():
+    """Real camera indices from /dev/video*, else a plain 0..MAX scan."""
+    try:
+        import glob
+        import re
+        idxs = []
+        for path in glob.glob('/dev/video*'):
+            m = re.search(r'(\d+)$', path)
+            if m:
+                idxs.append(int(m.group(1)))
+        if idxs:
+            return sorted(set(idxs))
+    except Exception:
+        pass
+    return list(range(MAX_CAM_INDEX))
+
 
 def _try_open(idx):
-    cap = cv2.VideoCapture(idx)
-    if cap.isOpened():
-        ok, _ = cap.read()
-        if ok:
-            return cap
+    for backend in _BACKENDS:
+        cap = cv2.VideoCapture(idx, backend)
+        if cap.isOpened():
+            ok, _ = cap.read()
+            if ok:
+                return cap
         cap.release()
     return None
 
 
 def open_camera(preferred):
-    """Try the preferred index first, then scan others for a working camera."""
-    order = [preferred] + [i for i in range(MAX_CAM_INDEX) if i != preferred]
+    """Try the preferred index first, then scan real devices for a working one."""
+    order = [preferred] + [i for i in camera_indices() if i != preferred]
     for idx in order:
         cap = _try_open(idx)
         if cap is not None:
@@ -188,9 +212,16 @@ def open_camera(preferred):
 
 
 def next_working_camera(current):
-    """First working camera *after* `current` (wrapping); (None, current) if none else."""
-    for step in range(1, MAX_CAM_INDEX):
-        idx = (current + step) % MAX_CAM_INDEX
+    """First working camera *after* `current` among real devices (wrapping)."""
+    idxs = camera_indices()
+    if current in idxs:
+        start = idxs.index(current) + 1
+    else:
+        start = 0
+    ordered = idxs[start:] + idxs[:start]   # everything after current, wrapping
+    for idx in ordered:
+        if idx == current:
+            continue
         cap = _try_open(idx)
         if cap is not None:
             return cap, idx
