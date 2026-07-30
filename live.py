@@ -12,9 +12,10 @@ No keyboard needed: tap the on-screen buttons (the tablet touchscreen
 registers taps as clicks).
   BASELINE  lock onto the clean face now (also discards the current end)
   SAVE END  record this end to score_history.csv, then reset for the next end
+  TARGET    switch face type (Clover 18-1 <-> Standard 10-ring)
   CAMERA    switch to the next connected camera (e.g. a plugged-in webcam)
   QUIT      exit
-Keys b / s / n / q still work too. The active camera index shows top-right;
+Keys b / s / t / n / q still work too. The active camera index shows top-right;
 session ends + running total show below it. History: score_history.csv.
 
 This is a starting point meant to be tuned against the real target -- arrow
@@ -31,8 +32,8 @@ from itertools import combinations
 import cv2
 import numpy as np
 
-from clover_scorer import (segment_green, find_disc, score_hit, render,
-                           RINGS, FACE_DIAMETER_IN)
+import faces
+from clover_scorer import render
 
 DIFF_THRESH = 45          # grayscale difference that counts as "changed"
 MIN_ARROW_AREA = 60       # px, ignore smaller changed blobs as noise
@@ -43,25 +44,26 @@ HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             'score_history.csv')
 
 
-def spread_inches(scored, R):
+def spread_inches(scored, R, diameter_in):
     """Widest gap between any two hits, in inches (0 for <2 hits)."""
     pts = [(x, y) for x, y, _ in scored]
     if len(pts) < 2 or not R:
         return 0.0
     worst = max(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
                 for a, b in combinations(pts, 2))
-    return worst * FACE_DIAMETER_IN / (2.0 * R)
+    return worst * diameter_in / (2.0 * R)
 
 
-def save_end(scored, R):
+def save_end(scored, R, face):
     """Append one shooting end to the history CSV. Returns the row dict."""
     total = sum(s for _, _, s in scored)
     row = {
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'face': face.name,
         'arrows': len(scored),
         'total': total,
         'scores': ' '.join(str(s) for _, _, s in scored),
-        'spread_in': round(spread_inches(scored, R), 2),
+        'spread_in': round(spread_inches(scored, R, face.diameter_in), 2),
     }
     new = not os.path.exists(HISTORY_FILE)
     with open(HISTORY_FILE, 'a', newline='') as f:
@@ -83,9 +85,9 @@ def _on_mouse(event, x, y, flags, param):
                 param['action'] = name
 
 
-BUTTON_ORDER = ['baseline', 'save', 'camera', 'quit']
+BUTTON_ORDER = ['baseline', 'save', 'target', 'camera', 'quit']
 BUTTON_LABELS = {'baseline': 'BASELINE', 'save': 'SAVE END',
-                 'camera': 'CAMERA', 'quit': 'QUIT'}
+                 'target': 'TARGET', 'camera': 'CAMERA', 'quit': 'QUIT'}
 
 
 def button_layout(w, h):
@@ -130,36 +132,24 @@ def find_arrows(baseline, frame, disc_mask):
     return hits
 
 
-def score_frame(frame, baseline, cx, cy, R, disc_mask):
+def score_frame(frame, baseline, cx, cy, R, disc_mask, face):
     hits = find_arrows(baseline, frame, disc_mask)
-    scored = [(x, y, score_hit(cx, cy, R, x, y)) for (x, y) in hits]
-    vis = render(frame, cx, cy, R, scored)
+    scored = [(x, y, face.score(cx, cy, R, x, y)) for (x, y) in hits]
+    vis = render(frame, cx, cy, R, scored, rings=face.rings)
     total = sum(s for _, _, s in scored)
     cv2.putText(vis, f"Arrows: {len(scored)}   Total: {total}",
                 (10, 26), FONT, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
     return vis, scored, total
 
 
-def try_lock(frame):
-    """Attempt to find the disc in a frame; return (cx,cy,R,mask) or None."""
-    try:
-        green = segment_green(frame)
-        cx, cy, R, mask = find_disc(green)
-        if R < 20:              # too small to be the face
-            return None
-        return cx, cy, R, mask
-    except Exception:
-        return None
-
-
-def _do_baseline(frame):
-    lock = try_lock(frame)
+def _do_baseline(frame, face):
+    lock = face.detect(frame)
     if lock is None:
-        print("no clover disc detected yet -- reframe the face")
+        print(f"no {face.name} target detected yet -- reframe the face")
         return None
     cx, cy, R, mask = lock
-    print(f"baselined: center=({cx},{cy}) R={R}px "
-          f"scale={FACE_DIAMETER_IN / (2.0 * R):.4f} in/px")
+    print(f"baselined {face.name}: center=({cx},{cy}) R={R}px "
+          f"scale={face.diameter_in / (2.0 * R):.4f} in/px")
     return (frame.copy(), cx, cy, R, mask)
 
 
@@ -247,6 +237,7 @@ def main(cam_index):
     session_ends = 0
     session_total = 0
     flash = ('', 0.0)         # (message, expiry time) shown briefly after save
+    face = faces.FACES[0]     # current target profile (TARGET button cycles it)
     print(__doc__)
 
     while True:
@@ -282,10 +273,10 @@ def main(cam_index):
 
             if baseline is not None:
                 disp, last_scored, _ = score_frame(frame, baseline,
-                                                   cx, cy, R, disc_mask)
+                                                   cx, cy, R, disc_mask, face)
             else:
                 disp = frame.copy()
-                lock = try_lock(frame)
+                lock = face.detect(frame)
                 if lock is not None:
                     lcx, lcy, lR, _ = lock
                     cv2.circle(disp, (lcx, lcy), lR, (0, 255, 255), 2)
@@ -300,7 +291,7 @@ def main(cam_index):
                                     (0, 255, 255), 2, cv2.LINE_AA)
                 else:
                     disc_seen_since = None
-                    cv2.putText(disp, "Point at the clean clover face...",
+                    cv2.putText(disp, f"Point at the clean {face.name} face...",
                                 (10, 26), FONT, 0.7, (0, 255, 255), 2,
                                 cv2.LINE_AA)
 
@@ -308,6 +299,8 @@ def main(cam_index):
                     (200, 200, 200), 2, cv2.LINE_AA)
         cv2.putText(disp, f"ends {session_ends}  total {session_total}",
                     (w - 240, 52), FONT, 0.6, (200, 200, 200), 2, cv2.LINE_AA)
+        cv2.putText(disp, f"[{face.name}]", (10, 52), FONT, 0.55,
+                    (0, 200, 255), 2, cv2.LINE_AA)
         if flash[1] > time.time():
             cv2.putText(disp, flash[0], (10, last_wh[1] - 70), FONT, 0.7,
                         (0, 255, 0), 2, cv2.LINE_AA)
@@ -321,6 +314,8 @@ def main(cam_index):
             action = 'baseline'
         elif key == ord('s'):
             action = 'save'
+        elif key == ord('t'):
+            action = 'target'
         elif key == ord('n'):
             action = 'camera'
         elif key in (ord('q'), 27):
@@ -329,13 +324,21 @@ def main(cam_index):
         if action == 'quit':
             break
         elif action == 'baseline':
-            res = _do_baseline(frame)
+            res = _do_baseline(frame, face)
             if res is not None:
                 baseline, cx, cy, R, disc_mask = res
             disc_seen_since = None
+        elif action == 'target':
+            i = faces.FACES.index(face)
+            face = faces.FACES[(i + 1) % len(faces.FACES)]
+            baseline = None
+            disc_seen_since = None
+            last_scored = []
+            flash = (f"Target: {face.name}", time.time() + 2)
+            print(f"target face -> {face.name}")
         elif action == 'save':
             if last_scored:
-                row = save_end(last_scored, R)
+                row = save_end(last_scored, R, face)
                 session_ends += 1
                 session_total += row['total']
                 flash = (f"Saved end #{session_ends}: {row['total']} pts "

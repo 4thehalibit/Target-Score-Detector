@@ -87,10 +87,10 @@ def score_hit(cx, cy, R, x, y):
     return MISS
 
 
-def render(img, cx, cy, R, hits=None):
+def render(img, cx, cy, R, hits=None, rings=None):
     vis = img.copy()
     # scoring rings, labelled with their point value
-    for f, pts in RINGS:
+    for f, pts in (rings or RINGS):
         cv2.circle(vis, (cx, cy), int(f * R), (255, 255, 255), 1)
         cv2.putText(vis, str(pts), (cx + int(f * R) - 16, cy - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
