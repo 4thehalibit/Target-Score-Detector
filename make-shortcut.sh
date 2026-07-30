@@ -22,6 +22,8 @@ Categories=Utility;Graphics;
 EOF
 
 chmod +x "$DESKTOP"
+# GNOME/Pop!_OS may require the launcher to be marked trusted before it runs.
+gio set "$DESKTOP" metadata::trusted true 2>/dev/null || true
 update-desktop-database "$APPS" 2>/dev/null || true
 
 echo "Installed launcher: $DESKTOP"
