@@ -19,7 +19,7 @@ write_entry() {   # $1=file  $2=name  $3=terminal(true/false)
 Type=Application
 Name=$2
 Comment=Live camera scorer for the Rinehart 18-1 clover face
-Exec=$DIR/run.sh
+Exec=$DIR/run.sh 1
 Icon=$DIR/icon.png
 Terminal=$3
 Categories=Utility;Graphics;

@@ -112,10 +112,25 @@ def _do_baseline(frame):
     return (frame.copy(), cx, cy, R, mask)
 
 
+def open_camera(preferred):
+    """Try the preferred index first, then scan others for a working camera."""
+    order = [preferred] + [i for i in range(0, 6) if i != preferred]
+    for idx in order:
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            ok, _ = cap.read()
+            if ok:
+                print(f"using camera index {idx}")
+                return cap
+            cap.release()
+    return None
+
+
 def main(cam_index):
-    cap = cv2.VideoCapture(cam_index)
-    if not cap.isOpened():
-        print(f"Could not open camera {cam_index}")
+    cap = open_camera(cam_index)
+    if cap is None:
+        print("Could not open any camera (tried indices 0-5). "
+              "Is another app using it, or is camera permission blocked?")
         return
     win = 'Rinehart 18-1 Live Scorer'
     cv2.namedWindow(win)
