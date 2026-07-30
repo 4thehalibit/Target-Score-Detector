@@ -143,7 +143,7 @@ class VideoAnalyzer:
                 grouping_diameter = grouper.measure_grouping_diameter(grouping_contour) if has_group else 0
                     
                 # write meta data on frame
-                sketcher.draw_meta_data_block(frame)
+                sketcher.draw_data_block(frame)
                 verified_scores = [h.score for h in verified_hits]
                 arrows_amount = len(verified_scores)
                 sketcher.type_arrows_amount(frame, arrows_amount, (0x0,0x0,0xff))
