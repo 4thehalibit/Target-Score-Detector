@@ -31,6 +31,7 @@ from clover_scorer import (segment_green, find_disc, score_hit, render,
 DIFF_THRESH = 45          # grayscale difference that counts as "changed"
 MIN_ARROW_AREA = 60       # px, ignore smaller changed blobs as noise
 AUTO_BASELINE_SEC = 3.0   # auto-lock this long after a clean disc is visible
+RECONNECT_SEC = 1.5       # how often to retry the camera after it drops out
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 _ui = {'buttons': {}, 'action': None}
@@ -170,37 +171,63 @@ def main(cam_index):
     baseline = None
     cx = cy = R = disc_mask = None
     disc_seen_since = None
+    last_wh = (640, 480)      # remembered so we can draw a UI with no camera
+    last_reconnect = 0.0
     print(__doc__)
 
     while True:
-        ok, frame = cap.read()
-        if not ok:
-            print("camera read failed")
-            break
-        h, w = frame.shape[:2]
-        _ui['buttons'] = button_layout(w, h)
+        ok, frame = (cap.read() if cap is not None else (False, None))
 
-        if baseline is not None:
-            disp, _, _ = score_frame(frame, baseline, cx, cy, R, disc_mask)
-        else:
-            disp = frame.copy()
-            lock = try_lock(frame)
-            if lock is not None:
-                lcx, lcy, lR, _ = lock
-                cv2.circle(disp, (lcx, lcy), lR, (0, 255, 255), 2)
-                if disc_seen_since is None:
-                    disc_seen_since = time.time()
-                left = AUTO_BASELINE_SEC - (time.time() - disc_seen_since)
-                if left <= 0:
-                    _ui['action'] = 'baseline'
-                else:
-                    cv2.putText(disp, f"Auto-locking in {left:.0f}s "
-                                f"(or tap BASELINE)", (10, 26), FONT, 0.7,
-                                (0, 255, 255), 2, cv2.LINE_AA)
-            else:
+        if not ok:
+            # camera dropped out (e.g. USB plugged/unplugged) -- don't quit,
+            # keep the window alive and try to reconnect.
+            if cap is not None:
+                print("camera lost; reconnecting...")
+                cap.release()
+                cap = None
+                baseline = None
                 disc_seen_since = None
-                cv2.putText(disp, "Point at the clean clover face...",
-                            (10, 26), FONT, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+            now = time.time()
+            if now - last_reconnect > RECONNECT_SEC:
+                last_reconnect = now
+                newcap, newidx = open_camera(cur_idx)
+                if newcap is not None:
+                    cap, cur_idx = newcap, newidx
+                    continue
+            w, h = last_wh
+            disp = np.zeros((h, w, 3), np.uint8)
+            cv2.putText(disp, "Camera disconnected -- reconnecting...",
+                        (10, 30), FONT, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(disp, "Tap CAMERA to pick another, or QUIT.",
+                        (10, 58), FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            _ui['buttons'] = button_layout(w, h)
+        else:
+            h, w = frame.shape[:2]
+            last_wh = (w, h)
+            _ui['buttons'] = button_layout(w, h)
+
+            if baseline is not None:
+                disp, _, _ = score_frame(frame, baseline, cx, cy, R, disc_mask)
+            else:
+                disp = frame.copy()
+                lock = try_lock(frame)
+                if lock is not None:
+                    lcx, lcy, lR, _ = lock
+                    cv2.circle(disp, (lcx, lcy), lR, (0, 255, 255), 2)
+                    if disc_seen_since is None:
+                        disc_seen_since = time.time()
+                    left = AUTO_BASELINE_SEC - (time.time() - disc_seen_since)
+                    if left <= 0:
+                        _ui['action'] = 'baseline'
+                    else:
+                        cv2.putText(disp, f"Auto-locking in {left:.0f}s "
+                                    f"(or tap BASELINE)", (10, 26), FONT, 0.7,
+                                    (0, 255, 255), 2, cv2.LINE_AA)
+                else:
+                    disc_seen_since = None
+                    cv2.putText(disp, "Point at the clean clover face...",
+                                (10, 26), FONT, 0.7, (0, 255, 255), 2,
+                                cv2.LINE_AA)
 
         cv2.putText(disp, f"cam {cur_idx}", (w - 90, 26), FONT, 0.6,
                     (200, 200, 200), 2, cv2.LINE_AA)
@@ -233,7 +260,8 @@ def main(cam_index):
         elif action == 'camera':
             newcap, newidx = next_working_camera(cur_idx)
             if newcap is not None:
-                cap.release()
+                if cap is not None:
+                    cap.release()
                 cap, cur_idx = newcap, newidx
                 baseline = None
                 disc_seen_since = None
@@ -241,7 +269,8 @@ def main(cam_index):
             else:
                 print("no other working camera found")
 
-    cap.release()
+    if cap is not None:
+        cap.release()
     cv2.destroyAllWindows()
 
 
