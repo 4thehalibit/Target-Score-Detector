@@ -1,15 +1,20 @@
 # Target Score Detector
 A computer vision tool for target shooting score detection and performance analysis.
 
-It has two parts:
+It has three parts:
 
-1. **`Driver.py`** — the original video analyzer (upstream from
-   [Niv-Kor](https://github.com/Niv-Kor/Target-Score-Detector)): tracks arrows
-   across the frames of a video against a standard concentric-ring target face
-   and overlays score, arrow count, and grouping.
-2. **`clover_scorer.py`** — a single-photo scorer for the **Rinehart 18-1
-   "clover" face** (green disc, black 4-lobe clover, black center you aim at).
-   Radial ring scoring around the black center hub.
+1. **`live.py`** — **live camera scorer** for the **Rinehart 18-1 "clover"
+   face**. Prop the camera at the target, press `b` to lock onto the clean
+   face, then shoot: it finds each new arrow by frame-differencing and scores
+   it by ring in real time. Keys: `b` baseline, `c` clear, `q` quit.
+2. **`clover_scorer.py`** — score a single still photo of the clover face, and
+   the shared geometry/scoring used by `live.py`.
+3. **`Driver.py`** — the original video-file analyzer (upstream from
+   [Niv-Kor](https://github.com/Niv-Kor/Target-Score-Detector)) for standard
+   concentric-ring archery faces.
+
+Clover face = green disc, black 4-lobe clover, black center you aim at; radial
+ring scoring around the black center hub.
 
 ### Demo video (original):
 <a href="https://www.youtube.com/watch?v=0vi2vHIHs0Q&feature=youtu.be">
@@ -28,6 +33,19 @@ source .venv/bin/activate
 ```
 
 Dependencies are just `opencv-python` and `numpy` (see `requirements.txt`).
+
+## Live scoring (camera)
+
+Prop the tablet/webcam so it sees the target face straight-on, then:
+
+```bash
+python live.py            # or: python live.py 1   to pick camera index 1
+```
+
+Frame the clean face, press **`b`** to lock the scoring geometry, then shoot.
+Detection threshold and arrow-impact estimation are tunable near the top of
+`live.py` (`DIFF_THRESH`, `MIN_ARROW_AREA`) — expect to adjust these against the
+real target and lighting.
 
 ## Scoring a Rinehart 18-1 clover face
 

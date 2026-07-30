@@ -26,7 +26,12 @@ class VideoAnalyzer:
         self.inner_diam = diamPx
         self.model = model
         self.frame_h, self.frame_w, _ = frameSize
-        self.sift = cv2.xfeatures2d.SIFT_create()
+        # SIFT moved out of xfeatures2d into the main module in OpenCV 4.4+
+        # (and is what plain opencv-python ships). Fall back for old builds.
+        try:
+            self.sift = cv2.SIFT_create()
+        except AttributeError:
+            self.sift = cv2.xfeatures2d.SIFT_create()
 
         # calculate anchor points and model features
         self.anchor_points, self.pad_model = geo2D.zero_pad_as(model, frameSize)
